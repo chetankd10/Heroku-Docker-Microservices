@@ -1,0 +1,26 @@
+services:
+  gateway:
+    image: nginx:1.27-alpine
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./gateway/nginx.dev.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - ticket-service
+
+  ticket-service:
+    build: ./ticket-service
+    environment:
+      - PORT=5001
+      - NOTIFICATION_SERVICE_URL=http://notification-service:5002
+    expose:
+      - "5001"
+    depends_on:
+      - notification-service
+
+  notification-service:
+    build: ./notification-service
+    environment:
+      - PORT=5002
+    expose:
+      - "5002"

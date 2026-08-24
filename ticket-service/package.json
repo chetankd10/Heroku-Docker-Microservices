@@ -1,0 +1,16 @@
+{
+  "name": "routedesk",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Internal request routing app: nginx front door + Express ticket-routing service",
+  "main": "index.js",
+  "engines": {
+    "node": "20.x"
+  },
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  }
+}

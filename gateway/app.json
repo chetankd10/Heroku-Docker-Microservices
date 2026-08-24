@@ -1,0 +1,12 @@
+{
+  "name": "routedesk-gateway",
+  "description": "Public entrypoint for RouteDesk. Reverse-proxies to internal-routing backend apps in the same Private Space.",
+  "buildpacks": [
+    { "url": "https://github.com/heroku/heroku-buildpack-nginx" }
+  ],
+  "env": {
+    "TICKET_SERVICE_HOST": {
+      "description": "Hostname of the routedesk-ticket-service app, e.g. routedesk-ticket-service.herokuapp.com"
+    }
+  }
+}

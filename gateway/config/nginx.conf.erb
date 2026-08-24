@@ -1,0 +1,50 @@
+daemon off;
+worker_processes auto;
+
+events {
+  use epoll;
+  accept_mutex on;
+  worker_connections 1024;
+}
+
+http {
+  gzip on;
+  gzip_comp_level 2;
+  gzip_min_length 512;
+  server_tokens off;
+
+  log_format l2met 'measure#nginx.service=$request_time request_id=$http_x_request_id';
+  access_log <%= ENV['NGINX_ACCESS_LOG_PATH'] || 'logs/nginx/access.log' %> l2met;
+  error_log <%= ENV['NGINX_ERROR_LOG_PATH'] || 'logs/nginx/error.log' %>;
+
+  include mime.types;
+  default_type application/octet-stream;
+  sendfile on;
+
+  server {
+    listen <%= ENV['PORT'] %>;
+    server_name _;
+    keepalive_timeout 5;
+
+    # TICKET_SERVICE_HOST is the ticket-service app's own hostname
+    # (<appname>.herokuapp.com). It's only reachable from here because both
+    # apps are internal-routing-enabled apps in the same Private Space.
+    location /health {
+      proxy_pass https://<%= ENV['TICKET_SERVICE_HOST'] %>/health;
+      proxy_ssl_server_name on;
+      proxy_set_header Host <%= ENV['TICKET_SERVICE_HOST'] %>;
+    }
+
+    location /api/tickets {
+      proxy_pass https://<%= ENV['TICKET_SERVICE_HOST'] %>/api/tickets;
+      proxy_ssl_server_name on;
+      proxy_set_header Host <%= ENV['TICKET_SERVICE_HOST'] %>;
+      proxy_set_header X-Real-IP $remote_addr;
+      proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+
+    location / {
+      return 404;
+    }
+  }
+}
