@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>RouteDesk</title>
+<style>
+  :root { --border: #d9dde3; --muted: #6b7280; --accent: #2563eb; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: #f7f8fa; color: #1f2430;
+  }
+  header {
+    padding: 20px 24px; background: #fff; border-bottom: 1px solid var(--border);
+  }
+  header h1 { margin: 0; font-size: 20px; }
+  header p { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
+  main { max-width: 900px; margin: 24px auto; padding: 0 16px; display: grid; gap: 24px; }
+  .card { background: #fff; border: 1px solid var(--border); border-radius: 10px; padding: 20px; }
+  .card h2 { margin: 0 0 14px; font-size: 15px; }
+  form { display: grid; gap: 12px; }
+  label { font-size: 12px; color: var(--muted); display: block; margin-bottom: 4px; }
+  input, select, textarea {
+    width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px;
+    font-size: 14px; font-family: inherit;
+  }
+  textarea { resize: vertical; min-height: 60px; }
+  button {
+    background: var(--accent); color: #fff; border: none; padding: 10px 16px;
+    border-radius: 6px; font-size: 14px; cursor: pointer; justify-self: start;
+  }
+  button:hover { background: #1d4ed8; }
+  button.secondary { background: #fff; color: var(--accent); border: 1px solid var(--accent); }
+  button.secondary:hover { background: #eff4ff; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 600; }
+  .badge {
+    display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px;
+    font-weight: 600; color: #fff;
+  }
+  .status-msg { font-size: 13px; margin-top: 8px; }
+  .status-msg.error { color: #b91c1c; }
+  .status-msg.ok { color: #15803d; }
+  .empty { color: var(--muted); font-size: 13px; padding: 8px 0; }
+  .top-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>RouteDesk</h1>
+  <p>Submit a request, it gets auto-routed to the right team and stored via the ticket-service.</p>
+</header>
+
+<main>
+  <section class="card">
+    <h2>New ticket</h2>
+    <form id="ticket-form">
+      <div>
+        <label for="title">Title</label>
+        <input id="title" name="title" required maxlength="120" placeholder="VPN not connecting" />
+      </div>
+      <div>
+        <label for="description">Description</label>
+        <textarea id="description" name="description" placeholder="Optional details"></textarea>
+      </div>
+      <div>
+        <label for="category">Category</label>
+        <select id="category" name="category">
+          <option value="billing">billing</option>
+          <option value="outage">outage</option>
+          <option value="incident">incident</option>
+          <option value="bug">bug</option>
+          <option value="access">access</option>
+          <option value="permissions">permissions</option>
+          <option value="other">other (general-support)</option>
+        </select>
+      </div>
+      <button type="submit">Create ticket</button>
+      <div id="form-status" class="status-msg"></div>
+    </form>
+  </section>
+
+  <section class="card">
+    <div class="top-row">
+      <h2 style="margin:0">Tickets</h2>
+      <button type="button" class="secondary" id="refresh-btn">Refresh</button>
+    </div>
+    <div id="tickets-container"><p class="empty">Loading…</p></div>
+  </section>
+</main>
+
+<script>
+const TEAM_COLORS = {
+  'finance-ops': '#7c3aed',
+  'sre-oncall': '#dc2626',
+  'engineering': '#2563eb',
+  'it-support': '#ea580c',
+  'general-support': '#6b7280',
+};
+
+async function loadTickets() {
+  const container = document.getElementById('tickets-container');
+  try {
+    const res = await fetch('/api/tickets');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const tickets = await res.json();
+    renderTickets(tickets);
+  } catch (err) {
+    container.innerHTML = '<p class="status-msg error">Failed to load tickets: ' + err.message + '</p>';
+  }
+}
+
+function renderTickets(tickets) {
+  const container = document.getElementById('tickets-container');
+  if (!tickets.length) {
+    container.innerHTML = '<p class="empty">No tickets yet — create one above.</p>';
+    return;
+  }
+  const rows = tickets.slice().reverse().map(t => {
+    const color = TEAM_COLORS[t.team] || '#6b7280';
+    const created = new Date(t.createdAt).toLocaleString();
+    return `<tr>
+      <td>#${t.id}</td>
+      <td>${escapeHtml(t.title)}</td>
+      <td>${escapeHtml(t.category)}</td>
+      <td><span class="badge" style="background:${color}">${escapeHtml(t.team)}</span></td>
+      <td>${escapeHtml(t.status)}</td>
+      <td>${created}</td>
+    </tr>`;
+  }).join('');
+  container.innerHTML = `<table>
+    <thead><tr><th>ID</th><th>Title</th><th>Category</th><th>Team</th><th>Status</th><th>Created</th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table>`;
+}
+
+function escapeHtml(str) {
+  return String(str).replace(/[&<>"']/g, c => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[c]));
+}
+
+document.getElementById('ticket-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const statusEl = document.getElementById('form-status');
+  statusEl.textContent = '';
+  statusEl.className = 'status-msg';
+
+  const title = document.getElementById('title').value.trim();
+  const description = document.getElementById('description').value.trim();
+  const category = document.getElementById('category').value;
+
+  if (!title) {
+    statusEl.textContent = 'Title is required.';
+    statusEl.className = 'status-msg error';
+    return;
+  }
+
+  try {
+    const res = await fetch('/api/tickets', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title, description, category }),
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const ticket = await res.json();
+    statusEl.textContent = `Created ticket #${ticket.id}, routed to ${ticket.team}.`;
+    statusEl.className = 'status-msg ok';
+    e.target.reset();
+    document.getElementById('category').value = 'billing';
+    loadTickets();
+  } catch (err) {
+    statusEl.textContent = 'Failed to create ticket: ' + err.message;
+    statusEl.className = 'status-msg error';
+  }
+});
+
+document.getElementById('refresh-btn').addEventListener('click', loadTickets);
+
+loadTickets();
+</script>
+</body>
+</html>

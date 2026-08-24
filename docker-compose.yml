@@ -5,6 +5,7 @@ services:
       - "8080:8080"
     volumes:
       - ./gateway/nginx.dev.conf:/etc/nginx/nginx.conf:ro
+      - ./gateway/public:/usr/share/nginx/html:ro
     depends_on:
       - ticket-service
 
