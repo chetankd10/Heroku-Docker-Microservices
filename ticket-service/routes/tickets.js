@@ -68,6 +68,7 @@ router.post('/', (req, res) => {
     team: routeToTeam(category),
     status: 'open',
     assignee: null,
+    archived: false,
     createdAt: new Date().toISOString(),
   };
 
@@ -77,7 +78,8 @@ router.post('/', (req, res) => {
 });
 
 router.get('/', (req, res) => {
-  res.json(tickets);
+  const includeArchived = req.query.includeArchived === 'true';
+  res.json(includeArchived ? tickets : tickets.filter((t) => !t.archived));
 });
 
 router.get('/meta/roster', (req, res) => {
@@ -109,6 +111,16 @@ router.patch('/:id', (req, res) => {
     ticket.assignee = assignee || null;
   }
 
+  res.json(ticket);
+});
+
+router.delete('/:id', (req, res) => {
+  const ticket = tickets.find((t) => t.id === Number(req.params.id));
+  if (!ticket) {
+    return res.status(404).json({ error: 'ticket not found' });
+  }
+
+  ticket.archived = true;
   res.json(ticket);
 });
 

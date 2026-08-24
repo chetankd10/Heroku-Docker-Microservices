@@ -61,6 +61,10 @@
   .modal .desc { font-size: 14px; margin-bottom: 16px; white-space: pre-wrap; }
   .modal-row { display: grid; gap: 12px; margin-bottom: 14px; }
   .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 16px; }
+  button.danger { background: #fff; color: #b91c1c; border: 1px solid #b91c1c; margin-right: auto; }
+  button.danger:hover { background: #fef2f2; }
+  .archived-row { opacity: 0.55; }
+  .toggle-row { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
 </style>
 </head>
 <body>
@@ -101,7 +105,13 @@
   <section class="card">
     <div class="top-row">
       <h2 style="margin:0">Tickets</h2>
-      <button type="button" class="secondary" id="refresh-btn">Refresh</button>
+      <div style="display:flex; align-items:center; gap:16px;">
+        <label class="toggle-row">
+          <input type="checkbox" id="show-archived-toggle" style="width:auto;" />
+          Show archived
+        </label>
+        <button type="button" class="secondary" id="refresh-btn">Refresh</button>
+      </div>
     </div>
     <div id="tickets-container"><p class="empty">Loading…</p></div>
   </section>
@@ -124,6 +134,7 @@
     </div>
     <div id="modal-status-msg" class="status-msg"></div>
     <div class="modal-actions">
+      <button type="button" class="danger" id="modal-archive">Archive</button>
       <button type="button" class="secondary" id="modal-close">Close</button>
       <button type="button" id="modal-save">Save</button>
     </div>
@@ -154,8 +165,9 @@ async function loadRoster() {
 
 async function loadTickets() {
   const container = document.getElementById('tickets-container');
+  const includeArchived = document.getElementById('show-archived-toggle').checked;
   try {
-    const res = await fetch('/api/tickets');
+    const res = await fetch(`/api/tickets${includeArchived ? '?includeArchived=true' : ''}`);
     if (!res.ok) throw new Error('HTTP ' + res.status);
     ticketsCache = await res.json();
     renderTickets(ticketsCache);
@@ -173,12 +185,12 @@ function renderTickets(tickets) {
   const rows = tickets.slice().reverse().map(t => {
     const color = TEAM_COLORS[t.team] || '#6b7280';
     const created = new Date(t.createdAt).toLocaleString();
-    return `<tr data-id="${t.id}">
+    return `<tr data-id="${t.id}" class="${t.archived ? 'archived-row' : ''}">
       <td>#${t.id}</td>
       <td>${escapeHtml(t.title)}</td>
       <td>${escapeHtml(t.category)}</td>
       <td><span class="badge" style="background:${color}">${escapeHtml(t.team)}</span></td>
-      <td>${escapeHtml(t.status)}</td>
+      <td>${escapeHtml(t.status)}${t.archived ? ' (archived)' : ''}</td>
       <td>${escapeHtml(t.assignee || '—')}</td>
       <td>${created}</td>
     </tr>`;
@@ -251,11 +263,31 @@ async function saveModal() {
   }
 }
 
+async function archiveModal() {
+  const id = Number(document.getElementById('modal-save').dataset.id);
+  const msgEl = document.getElementById('modal-status-msg');
+  if (!confirm(`Archive ticket #${id}? It will be hidden from the default list.`)) return;
+
+  try {
+    const res = await fetch(`/api/tickets/${id}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    msgEl.textContent = 'Archived.';
+    msgEl.className = 'status-msg ok';
+    await loadTickets();
+    setTimeout(closeModal, 500);
+  } catch (err) {
+    msgEl.textContent = 'Failed to archive: ' + err.message;
+    msgEl.className = 'status-msg error';
+  }
+}
+
 document.getElementById('modal-close').addEventListener('click', closeModal);
 document.getElementById('modal-save').addEventListener('click', saveModal);
+document.getElementById('modal-archive').addEventListener('click', archiveModal);
 document.getElementById('modal-overlay').addEventListener('click', (e) => {
   if (e.target.id === 'modal-overlay') closeModal();
 });
+document.getElementById('show-archived-toggle').addEventListener('change', loadTickets);
 
 function escapeHtml(str) {
   return String(str).replace(/[&<>"']/g, c => ({
