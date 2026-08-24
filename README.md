@@ -30,10 +30,33 @@ restricts who's allowed to reach that hostname to other apps/networks in
 the same Space. Each service still binds Heroku's dynamic `$PORT` like any
 normal web dyno.
 
+```mermaid
+flowchart LR
+    Client([Client]) -->|public HTTPS| GW["gateway<br/>nginx, public"]
+    subgraph Space["Private Space"]
+        GW -->|internal-routing only| TS["ticket-service<br/>--internal-routing"]
+        TS -->|internal-routing only| NS["notification-service<br/>--internal-routing"]
+    end
 ```
-client -> routedesk-gateway (public)
-            -> routedesk-ticket-service (internal-routing only)
-                 -> routedesk-notification-service (internal-routing only)
+
+### Request flow
+
+Creating a ticket touches all three apps in one request:
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant G as gateway
+    participant T as ticket-service
+    participant N as notification-service
+
+    C->>G: POST /api/tickets
+    G->>T: proxy_pass (internal routing)
+    T->>T: assign team via rules engine
+    T->>N: POST /api/notify
+    N-->>T: 202 Accepted
+    T-->>G: 201 Created (ticket)
+    G-->>C: 201 Created (ticket)
 ```
 
 ### Routing rules (MVP)
