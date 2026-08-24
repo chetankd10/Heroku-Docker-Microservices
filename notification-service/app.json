@@ -1,5 +1,5 @@
 {
-  "name": "routedesk-notification-service",
+  "name": "cs-routedesk-notify-service",
   "description": "Internal-only notification stub. Created with --internal-routing so only apps in the same Private Space can reach it.",
   "buildpacks": [
     { "url": "heroku/nodejs" }

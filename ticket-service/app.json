@@ -1,12 +1,12 @@
 {
-  "name": "routedesk-ticket-service",
+  "name": "cs-routedesk-ticket-service",
   "description": "Internal-only ticket routing service. Created with --internal-routing so only apps in the same Private Space can reach it.",
   "buildpacks": [
     { "url": "heroku/nodejs" }
   ],
   "env": {
     "NOTIFICATION_SERVICE_URL": {
-      "description": "Base URL of the routedesk-notification-service app, e.g. https://routedesk-notification-service.herokuapp.com"
+      "description": "Base URL of the cs-routedesk-notify-service app. Private Space apps get a randomized hostname (not <appname>.herokuapp.com) - get it via 'heroku apps:info -a cs-routedesk-notify-service'."
     }
   }
 }

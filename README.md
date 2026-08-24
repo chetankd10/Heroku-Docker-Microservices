@@ -9,33 +9,45 @@ feature inside a Private Space.
 
 ## Architecture
 
-Three separate Heroku apps in the same Private Space:
+Three separate Heroku apps, all in the `heroku-csa-dsa` team's `test-space-or`
+Private Space:
 
-- **gateway** (`routedesk-gateway`) — the only public app. nginx
+- **gateway** (`cs-routedesk-gateway`) — the only public app. nginx
   ([heroku-buildpack-nginx](https://github.com/heroku/heroku-buildpack-nginx))
   binds Heroku's `$PORT` and reverse-proxies `/health` and `/api/tickets` to
   the ticket-service app.
-- **ticket-service** (`routedesk-ticket-service`) — Express app with the
+- **ticket-service** (`cs-routedesk-ticket-service`) — Express app with the
   routing rules engine. Created with `--internal-routing`, so it's **not**
   publicly reachable — only apps in the same Private Space (i.e. the
   gateway) can call it. On ticket creation it calls notification-service.
-- **notification-service** (`routedesk-notification-service`) — Express
+- **notification-service** (`cs-routedesk-notify-service`) — Express
   stub that logs "would notify team X about ticket Y". Also created with
   `--internal-routing`; only ticket-service calls it.
 
-Internal Routing works at the **app** level, addressed by each app's normal
-hostname (`https://<appname>.herokuapp.com`) with valid TLS out of the box —
-there's no port-based or per-process addressing. `--internal-routing` just
-restricts who's allowed to reach that hostname to other apps/networks in
-the same Space. Each service still binds Heroku's dynamic `$PORT` like any
-normal web dyno.
+Internal Routing works at the **app** level, addressed by each app's own
+hostname, with valid TLS out of the box — there's no port-based or
+per-process addressing. `--internal-routing` just restricts who's allowed
+to reach that hostname to other apps/networks in the same Space. Each
+service still binds Heroku's dynamic `$PORT` like any normal web dyno.
+
+Note: Private Space apps get a **randomized** default hostname, not
+`<appname>.herokuapp.com` — e.g. `cs-routedesk-gateway` is actually reachable
+at `routedesk-gateway-036b1704aa6b.herokuapp.com`. Always get the real
+hostname with `heroku apps:info -a <app-name>` rather than assuming it from
+the app name.
+
+| App | Real hostname | Reachable from |
+|---|---|---|
+| `cs-routedesk-gateway` | `routedesk-gateway-036b1704aa6b.herokuapp.com` | public internet |
+| `cs-routedesk-ticket-service` | `cs-routedesk-ticket-service-b98e36e50040.herokuapp.com` | only apps in `test-space-or` |
+| `cs-routedesk-notify-service` | `cs-routedesk-notify-service-ecfa0ff6cf48.herokuapp.com` | only apps in `test-space-or` |
 
 ```mermaid
 flowchart LR
-    Client([Client]) -->|public HTTPS| GW["gateway<br/>nginx, public"]
-    subgraph Space["Private Space"]
-        GW -->|internal-routing only| TS["ticket-service<br/>--internal-routing"]
-        TS -->|internal-routing only| NS["notification-service<br/>--internal-routing"]
+    Client([Client]) -->|public HTTPS| GW["cs-routedesk-gateway<br/>nginx, public"]
+    subgraph Space["test-space-or (Private Space)"]
+        GW -->|internal-routing only| TS["cs-routedesk-ticket-service<br/>--internal-routing"]
+        TS -->|internal-routing only| NS["cs-routedesk-notify-service<br/>--internal-routing"]
     end
 ```
 
@@ -95,45 +107,64 @@ ticket.
 ## Deploying to Heroku (Private Space + Internal Routing)
 
 Requires Heroku Enterprise (Private Spaces). Each service is its own app,
-deployed from its own subfolder. From the repo root:
+deployed from its own subfolder of this one repo. The three apps already
+exist (created once, see below) — buildpacks and config vars are already
+set. To (re)deploy code after changing a service, push its subtree to its
+Heroku remote:
+
+```bash
+git subtree push --prefix=gateway              heroku-gateway     main
+git subtree push --prefix=ticket-service        heroku-ticket      main
+git subtree push --prefix=notification-service  heroku-notification main
+```
+
+Those `heroku-*` remotes were added once with:
+
+```bash
+heroku git:remote -a cs-routedesk-gateway         -r heroku-gateway
+heroku git:remote -a cs-routedesk-ticket-service   -r heroku-ticket
+heroku git:remote -a cs-routedesk-notify-service   -r heroku-notification
+```
+
+One-time setup that was already done to create and wire up the three apps
+(kept here for reference / recreating in another space):
 
 ```bash
 # 1. Create all three apps in the same Private Space.
-#    Internal-routing can only be set at creation time.
-heroku apps:create routedesk-gateway --space <your-space> --team <your-team>
-heroku apps:create routedesk-ticket-service --space <your-space> --team <your-team> --internal-routing
-heroku apps:create routedesk-notification-service --space <your-space> --team <your-team> --internal-routing
+#    Internal-routing can only be set at creation time. App names must be
+#    <= 30 characters.
+heroku apps:create cs-routedesk-gateway --space test-space-or --team heroku-csa-dsa
+heroku apps:create cs-routedesk-ticket-service --space test-space-or --team heroku-csa-dsa --internal-routing
+heroku apps:create cs-routedesk-notify-service --space test-space-or --team heroku-csa-dsa --internal-routing
 
 # 2. Buildpacks per app
-heroku buildpacks:add heroku/nodejs -a routedesk-ticket-service
-heroku buildpacks:add heroku/nodejs -a routedesk-notification-service
-heroku buildpacks:add https://github.com/heroku/heroku-buildpack-nginx -a routedesk-gateway
+heroku buildpacks:add heroku/nodejs -a cs-routedesk-ticket-service
+heroku buildpacks:add heroku/nodejs -a cs-routedesk-notify-service
+heroku buildpacks:add https://github.com/heroku/heroku-buildpack-nginx -a cs-routedesk-gateway
 
-# 3. Config vars wiring the apps together by hostname
-heroku config:set NOTIFICATION_SERVICE_URL=https://routedesk-notification-service.herokuapp.com \
-  -a routedesk-ticket-service
-heroku config:set TICKET_SERVICE_HOST=routedesk-ticket-service.herokuapp.com \
-  -a routedesk-gateway
+# 3. Get each internal-routing app's real hostname (randomized, not
+#    derived from the app name), then wire the apps together with it
+heroku apps:info -a cs-routedesk-ticket-service | grep herokuapp.com
+heroku apps:info -a cs-routedesk-notify-service | grep herokuapp.com
 
-# 4. Deploy each subfolder to its own app (monorepo -> multiple Heroku apps)
-git subtree push --prefix notification-service \
-  https://git.heroku.com/routedesk-notification-service.git main
-git subtree push --prefix ticket-service \
-  https://git.heroku.com/routedesk-ticket-service.git main
-git subtree push --prefix gateway \
-  https://git.heroku.com/routedesk-gateway.git main
+heroku config:set NOTIFICATION_SERVICE_URL=https://cs-routedesk-notify-service-ecfa0ff6cf48.herokuapp.com \
+  -a cs-routedesk-ticket-service
+heroku config:set TICKET_SERVICE_HOST=cs-routedesk-ticket-service-b98e36e50040.herokuapp.com \
+  -a cs-routedesk-gateway
 ```
 
 Notes:
 
 - Automated Certificate Management (ACM) is **not** compatible with
   Internal Routing — not an issue here since these two apps have no custom
-  domains, only the default `*.herokuapp.com` hostname (which has valid TLS
-  by default).
+  domains, only the default randomized `*.herokuapp.com` hostname (which
+  has valid TLS by default).
 - At least one web dyno must be running on an internal-routing app for its
   hostname to resolve correctly from other apps in the Space.
 - `--internal-routing` cannot be added to an app after creation — it must
   be set with `heroku apps:create`.
+- Heroku app names are capped at 30 characters, which is why the
+  notification service is `-notify-service`, not `-notification-service`.
 
 ## Adding another microservice
 
