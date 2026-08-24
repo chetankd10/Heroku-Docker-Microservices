@@ -44,6 +44,12 @@ http {
       proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     }
 
+    location /api/notifications {
+      proxy_pass https://<%= ENV['TICKET_SERVICE_HOST'] %>/api/notifications;
+      proxy_ssl_server_name on;
+      proxy_set_header Host <%= ENV['TICKET_SERVICE_HOST'] %>;
+    }
+
     location / {
       try_files $uri $uri/ /index.html;
     }

@@ -9,12 +9,27 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok' });
 });
 
+// In-memory log of dummy emails "sent", so the frontend can display them.
+const notifications = [];
+let nextNotificationId = 1;
+
 // Dummy email sender: logs what would be sent instead of calling a real
 // provider (SES, SendGrid, etc.). Swap sendEmail's body for a real
 // integration later — the call sites below wouldn't need to change.
 function sendEmail({ to, subject, body }) {
+  notifications.push({
+    id: nextNotificationId++,
+    to,
+    subject,
+    body,
+    sentAt: new Date().toISOString(),
+  });
   console.log(`[email] to=${to} subject="${subject}" body="${body}"`);
 }
+
+app.get('/api/notifications', (req, res) => {
+  res.json(notifications.slice().reverse());
+});
 
 app.post('/api/notify', (req, res) => {
   const { type, ticketId, title, team, assigneeName, assigneeEmail } = req.body || {};

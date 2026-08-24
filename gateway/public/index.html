@@ -115,6 +115,14 @@
     </div>
     <div id="tickets-container"><p class="empty">Loading…</p></div>
   </section>
+
+  <section class="card">
+    <div class="top-row">
+      <h2 style="margin:0">Notifications (dummy emails sent)</h2>
+      <button type="button" class="secondary" id="notifications-refresh-btn">Refresh</button>
+    </div>
+    <div id="notifications-container"><p class="empty">Loading…</p></div>
+  </section>
 </main>
 
 <div class="overlay hidden" id="modal-overlay">
@@ -205,6 +213,58 @@ function renderTickets(tickets) {
   });
 }
 
+async function loadNotifications() {
+  const container = document.getElementById('notifications-container');
+  try {
+    const res = await fetch('/api/notifications');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const notifications = await res.json();
+    renderNotifications(notifications);
+  } catch (err) {
+    container.textContent = 'Failed to load notifications: ' + err.message;
+    container.className = 'status-msg error';
+  }
+}
+
+function renderNotifications(notifications) {
+  const container = document.getElementById('notifications-container');
+  container.className = '';
+  container.textContent = '';
+
+  if (!notifications.length) {
+    const p = document.createElement('p');
+    p.className = 'empty';
+    p.textContent = 'No notifications sent yet.';
+    container.appendChild(p);
+    return;
+  }
+
+  const table = document.createElement('table');
+  const thead = document.createElement('thead');
+  const headRow = document.createElement('tr');
+  ['To', 'Subject', 'Body', 'Sent at'].forEach(label => {
+    const th = document.createElement('th');
+    th.textContent = label;
+    headRow.appendChild(th);
+  });
+  thead.appendChild(headRow);
+  table.appendChild(thead);
+
+  const tbody = document.createElement('tbody');
+  notifications.forEach(n => {
+    const row = document.createElement('tr');
+    [n.to, n.subject, n.body, new Date(n.sentAt).toLocaleString()].forEach(value => {
+      const td = document.createElement('td');
+      td.textContent = value;
+      row.appendChild(td);
+    });
+    tbody.appendChild(row);
+  });
+  table.appendChild(tbody);
+
+  container.appendChild(table);
+}
+
 function openModal(id) {
   const ticket = ticketsCache.find(t => t.id === id);
   if (!ticket) return;
@@ -256,6 +316,7 @@ async function saveModal() {
     msgEl.textContent = 'Saved.';
     msgEl.className = 'status-msg ok';
     await loadTickets();
+    await loadNotifications();
     setTimeout(closeModal, 500);
   } catch (err) {
     msgEl.textContent = 'Failed to save: ' + err.message;
@@ -274,6 +335,7 @@ async function archiveModal() {
     msgEl.textContent = 'Archived.';
     msgEl.className = 'status-msg ok';
     await loadTickets();
+    await loadNotifications();
     setTimeout(closeModal, 500);
   } catch (err) {
     msgEl.textContent = 'Failed to archive: ' + err.message;
@@ -324,6 +386,7 @@ document.getElementById('ticket-form').addEventListener('submit', async (e) => {
     e.target.reset();
     document.getElementById('category').value = 'billing';
     loadTickets();
+    loadNotifications();
   } catch (err) {
     statusEl.textContent = 'Failed to create ticket: ' + err.message;
     statusEl.className = 'status-msg error';
@@ -331,8 +394,10 @@ document.getElementById('ticket-form').addEventListener('submit', async (e) => {
 });
 
 document.getElementById('refresh-btn').addEventListener('click', loadTickets);
+document.getElementById('notifications-refresh-btn').addEventListener('click', loadNotifications);
 
 loadRoster().then(loadTickets);
+loadNotifications();
 </script>
 </body>
 </html>
