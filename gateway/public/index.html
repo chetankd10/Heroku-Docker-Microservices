@@ -45,6 +45,22 @@
   .status-msg.ok { color: #15803d; }
   .empty { color: var(--muted); font-size: 13px; padding: 8px 0; }
   .top-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
+  tbody tr { cursor: pointer; }
+  tbody tr:hover { background: #f3f6fb; }
+  .overlay {
+    position: fixed; inset: 0; background: rgba(15, 20, 30, 0.45);
+    display: flex; align-items: center; justify-content: center; padding: 16px;
+  }
+  .overlay.hidden { display: none; }
+  .modal {
+    background: #fff; border-radius: 10px; padding: 22px; max-width: 480px; width: 100%;
+    max-height: 90vh; overflow-y: auto;
+  }
+  .modal h3 { margin: 0 0 4px; font-size: 17px; }
+  .modal .meta-line { color: var(--muted); font-size: 12px; margin-bottom: 14px; }
+  .modal .desc { font-size: 14px; margin-bottom: 16px; white-space: pre-wrap; }
+  .modal-row { display: grid; gap: 12px; margin-bottom: 14px; }
+  .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 16px; }
 </style>
 </head>
 <body>
@@ -91,6 +107,29 @@
   </section>
 </main>
 
+<div class="overlay hidden" id="modal-overlay">
+  <div class="modal">
+    <h3 id="modal-title"></h3>
+    <div class="meta-line" id="modal-meta"></div>
+    <div class="desc" id="modal-desc"></div>
+    <div class="modal-row">
+      <div>
+        <label for="modal-status">Status</label>
+        <select id="modal-status"></select>
+      </div>
+      <div>
+        <label for="modal-assignee">Assignee</label>
+        <select id="modal-assignee"></select>
+      </div>
+    </div>
+    <div id="modal-status-msg" class="status-msg"></div>
+    <div class="modal-actions">
+      <button type="button" class="secondary" id="modal-close">Close</button>
+      <button type="button" id="modal-save">Save</button>
+    </div>
+  </div>
+</div>
+
 <script>
 const TEAM_COLORS = {
   'finance-ops': '#7c3aed',
@@ -100,13 +139,26 @@ const TEAM_COLORS = {
   'general-support': '#6b7280',
 };
 
+let ticketsCache = [];
+let roster = { statuses: [], teamMembers: {} };
+
+async function loadRoster() {
+  try {
+    const res = await fetch('/api/tickets/meta/roster');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    roster = await res.json();
+  } catch (err) {
+    console.warn('Failed to load roster:', err.message);
+  }
+}
+
 async function loadTickets() {
   const container = document.getElementById('tickets-container');
   try {
     const res = await fetch('/api/tickets');
     if (!res.ok) throw new Error('HTTP ' + res.status);
-    const tickets = await res.json();
-    renderTickets(tickets);
+    ticketsCache = await res.json();
+    renderTickets(ticketsCache);
   } catch (err) {
     container.innerHTML = '<p class="status-msg error">Failed to load tickets: ' + err.message + '</p>';
   }
@@ -121,20 +173,89 @@ function renderTickets(tickets) {
   const rows = tickets.slice().reverse().map(t => {
     const color = TEAM_COLORS[t.team] || '#6b7280';
     const created = new Date(t.createdAt).toLocaleString();
-    return `<tr>
+    return `<tr data-id="${t.id}">
       <td>#${t.id}</td>
       <td>${escapeHtml(t.title)}</td>
       <td>${escapeHtml(t.category)}</td>
       <td><span class="badge" style="background:${color}">${escapeHtml(t.team)}</span></td>
       <td>${escapeHtml(t.status)}</td>
+      <td>${escapeHtml(t.assignee || '—')}</td>
       <td>${created}</td>
     </tr>`;
   }).join('');
   container.innerHTML = `<table>
-    <thead><tr><th>ID</th><th>Title</th><th>Category</th><th>Team</th><th>Status</th><th>Created</th></tr></thead>
+    <thead><tr><th>ID</th><th>Title</th><th>Category</th><th>Team</th><th>Status</th><th>Assignee</th><th>Created</th></tr></thead>
     <tbody>${rows}</tbody>
   </table>`;
+
+  container.querySelectorAll('tbody tr').forEach(row => {
+    row.addEventListener('click', () => openModal(Number(row.dataset.id)));
+  });
 }
+
+function openModal(id) {
+  const ticket = ticketsCache.find(t => t.id === id);
+  if (!ticket) return;
+
+  document.getElementById('modal-title').textContent = `#${ticket.id} — ${ticket.title}`;
+  document.getElementById('modal-meta').textContent =
+    `Category: ${ticket.category || '—'} · Team: ${ticket.team} · Created: ${new Date(ticket.createdAt).toLocaleString()}`;
+  document.getElementById('modal-desc').textContent = ticket.description || '(no description)';
+
+  const statusSelect = document.getElementById('modal-status');
+  const statuses = roster.statuses && roster.statuses.length ? roster.statuses : ['open', 'in-progress', 'resolved', 'closed'];
+  statusSelect.innerHTML = statuses.map(s =>
+    `<option value="${s}" ${s === ticket.status ? 'selected' : ''}>${s}</option>`
+  ).join('');
+
+  const assigneeSelect = document.getElementById('modal-assignee');
+  const teamRoster = (roster.teamMembers && roster.teamMembers[ticket.team]) || [];
+  const options = ['(unassigned)', ...teamRoster];
+  if (ticket.assignee && !options.includes(ticket.assignee)) options.push(ticket.assignee);
+  assigneeSelect.innerHTML = options.map(name => {
+    const value = name === '(unassigned)' ? '' : name;
+    const selected = (ticket.assignee || '') === value ? 'selected' : '';
+    return `<option value="${escapeHtml(value)}" ${selected}>${escapeHtml(name)}</option>`;
+  }).join('');
+
+  document.getElementById('modal-status-msg').textContent = '';
+  document.getElementById('modal-status-msg').className = 'status-msg';
+  document.getElementById('modal-save').dataset.id = ticket.id;
+  document.getElementById('modal-overlay').classList.remove('hidden');
+}
+
+function closeModal() {
+  document.getElementById('modal-overlay').classList.add('hidden');
+}
+
+async function saveModal() {
+  const id = Number(document.getElementById('modal-save').dataset.id);
+  const status = document.getElementById('modal-status').value;
+  const assignee = document.getElementById('modal-assignee').value;
+  const msgEl = document.getElementById('modal-status-msg');
+
+  try {
+    const res = await fetch(`/api/tickets/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status, assignee }),
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    msgEl.textContent = 'Saved.';
+    msgEl.className = 'status-msg ok';
+    await loadTickets();
+    setTimeout(closeModal, 500);
+  } catch (err) {
+    msgEl.textContent = 'Failed to save: ' + err.message;
+    msgEl.className = 'status-msg error';
+  }
+}
+
+document.getElementById('modal-close').addEventListener('click', closeModal);
+document.getElementById('modal-save').addEventListener('click', saveModal);
+document.getElementById('modal-overlay').addEventListener('click', (e) => {
+  if (e.target.id === 'modal-overlay') closeModal();
+});
 
 function escapeHtml(str) {
   return String(str).replace(/[&<>"']/g, c => ({
@@ -179,7 +300,7 @@ document.getElementById('ticket-form').addEventListener('submit', async (e) => {
 
 document.getElementById('refresh-btn').addEventListener('click', loadTickets);
 
-loadTickets();
+loadRoster().then(loadTickets);
 </script>
 </body>
 </html>

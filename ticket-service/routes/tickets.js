@@ -17,6 +17,17 @@ function routeToTeam(category) {
   return CATEGORY_TEAM_MAP[key] || 'general-support';
 }
 
+const STATUSES = ['open', 'in-progress', 'resolved', 'closed'];
+
+// Sample roster per team, used by the frontend to suggest an assignee.
+const TEAM_MEMBERS = {
+  'finance-ops': ['Priya Shah', 'Marcus Lee'],
+  'sre-oncall': ['Diego Ramirez', 'Sarah Chen'],
+  engineering: ['Wei Zhang', 'Aisha Khan'],
+  'it-support': ['Tom Becker', 'Nina Petrova'],
+  'general-support': ['Alex Johnson', 'Jordan Smith'],
+};
+
 const tickets = [];
 let nextId = 1;
 
@@ -56,6 +67,7 @@ router.post('/', (req, res) => {
     category: category || null,
     team: routeToTeam(category),
     status: 'open',
+    assignee: null,
     createdAt: new Date().toISOString(),
   };
 
@@ -68,11 +80,35 @@ router.get('/', (req, res) => {
   res.json(tickets);
 });
 
+router.get('/meta/roster', (req, res) => {
+  res.json({ statuses: STATUSES, teamMembers: TEAM_MEMBERS });
+});
+
 router.get('/:id', (req, res) => {
   const ticket = tickets.find((t) => t.id === Number(req.params.id));
   if (!ticket) {
     return res.status(404).json({ error: 'ticket not found' });
   }
+  res.json(ticket);
+});
+
+router.patch('/:id', (req, res) => {
+  const ticket = tickets.find((t) => t.id === Number(req.params.id));
+  if (!ticket) {
+    return res.status(404).json({ error: 'ticket not found' });
+  }
+
+  const { status, assignee } = req.body || {};
+  if (status !== undefined) {
+    if (!STATUSES.includes(status)) {
+      return res.status(400).json({ error: `status must be one of: ${STATUSES.join(', ')}` });
+    }
+    ticket.status = status;
+  }
+  if (assignee !== undefined) {
+    ticket.assignee = assignee || null;
+  }
+
   res.json(ticket);
 });
 
