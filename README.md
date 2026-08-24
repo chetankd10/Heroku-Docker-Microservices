@@ -1,11 +1,35 @@
 # RouteDesk
 
-Internal request-routing app. Someone submits a request (title, description,
-category), a rules engine assigns it to the right team, a notification is
-fired, and the ticket is stored for lookup. Built as three separate
-microservices to demonstrate Heroku's real
+Internal request-routing app with a small web UI. Someone submits a ticket
+(title, description, category) through the frontend, a rules engine assigns
+it to the right team, a (dummy) email notification is fired, and the ticket
+is stored for lookup, status updates, assignment, and archiving. Built as
+three separate microservices to demonstrate Heroku's real
 [Internal Routing](https://devcenter.heroku.com/articles/internal-routing)
 feature inside a Private Space.
+
+## How it works
+
+1. **Create a ticket** — open the gateway's public URL, fill in the form
+   (title, description, category), submit. The gateway proxies the POST to
+   ticket-service, which runs it through the rules engine (see below) to
+   assign a team, stores it in memory, and fires a "new ticket" email to the
+   team's dummy address (e.g. `sre-oncall@routedesk.example.com`) via
+   notification-service.
+2. **View / triage** — the ticket list on the page shows every open ticket
+   with its team, status, and assignee. Clicking a row opens a detail panel
+   with the full description.
+3. **Assign + update status** — from the detail panel, pick an assignee from
+   that team's roster and/or change status (`open` → `in-progress` →
+   `resolved` → `closed`). Saving `PATCH`es the ticket; if the assignee
+   changed, ticket-service fires a second "you've been assigned" email to
+   that person's dummy address.
+4. **Archive** — the detail panel's Archive button soft-deletes the ticket
+   (marks it `archived: true` instead of removing it). Archived tickets are
+   hidden from the default list; check "Show archived" to see them again.
+
+None of this touches a real mailbox — see [Notifications](#notifications)
+below for how the dummy emails work.
 
 ## Architecture
 
@@ -13,15 +37,18 @@ Three separate Heroku apps, all in the same Heroku Private Space:
 
 - **gateway** (`routedesk-gateway`) — the only public app. nginx
   ([heroku-buildpack-nginx](https://github.com/heroku/heroku-buildpack-nginx))
-  binds Heroku's `$PORT` and reverse-proxies `/health` and `/api/tickets` to
-  the ticket-service app.
+  binds Heroku's `$PORT`, serves the static frontend (`gateway/public/`) at
+  `/`, and reverse-proxies `/health` and `/api/tickets` to the
+  ticket-service app.
 - **ticket-service** (`routedesk-ticket-service`) — Express app with the
-  routing rules engine. Created with `--internal-routing`, so it's **not**
-  publicly reachable — only apps in the same Private Space (i.e. the
-  gateway) can call it. On ticket creation it calls notification-service.
+  routing rules engine, ticket storage, and the sample team roster. Created
+  with `--internal-routing`, so it's **not** publicly reachable — only apps
+  in the same Private Space (i.e. the gateway) can call it. Calls
+  notification-service on ticket creation and on assignment.
 - **notification-service** (`routedesk-notification-service`) — Express
-  stub that logs "would notify team X about ticket Y". Also created with
-  `--internal-routing`; only ticket-service calls it.
+  stub with a dummy email sender: it logs what it *would* send instead of
+  calling a real provider. Also created with `--internal-routing`; only
+  ticket-service calls it.
 
 Internal Routing works at the **app** level, addressed by each app's own
 hostname, with valid TLS out of the box — there's no port-based or
@@ -65,11 +92,15 @@ sequenceDiagram
     C->>G: POST /api/tickets
     G->>T: proxy_pass (internal routing)
     T->>T: assign team via rules engine
-    T->>N: POST /api/notify
+    T->>N: POST /api/notify (type: ticket_created)
     N-->>T: 202 Accepted
     T-->>G: 201 Created (ticket)
     G-->>C: 201 Created (ticket)
 ```
+
+Assigning a ticket later follows the same pattern on a `PATCH`:
+`C->>G->>T` (`PATCH /api/tickets/:id`) `->>N` (`POST /api/notify`, type
+`ticket_assigned`) — see [Notifications](#notifications).
 
 ### Routing rules (MVP)
 
@@ -86,10 +117,43 @@ sequenceDiagram
 Tickets are stored in memory — restarting the dyno clears them. Swap in
 Postgres later if persistence is needed.
 
+### API (ticket-service, proxied through the gateway)
+
+| Method | Path | What it does |
+|---|---|---|
+| `POST` | `/api/tickets` | Create a ticket. Routes to a team, fires a `ticket_created` email. |
+| `GET` | `/api/tickets` | List non-archived tickets. Add `?includeArchived=true` to include archived ones. |
+| `GET` | `/api/tickets/:id` | Fetch one ticket. |
+| `PATCH` | `/api/tickets/:id` | Update `status` and/or `assignee`. A new/changed `assignee` fires a `ticket_assigned` email. |
+| `DELETE` | `/api/tickets/:id` | Archive (soft-delete) a ticket — sets `archived: true`, doesn't remove it. |
+| `GET` | `/api/tickets/meta/roster` | Valid statuses + per-team sample roster (name + dummy email), used by the frontend's dropdowns. |
+
+## Notifications
+
+notification-service doesn't send real email — it has a `sendEmail()` stub
+(`notification-service/index.js`) that just `console.log`s what it would
+send. There's no SMTP/SES/SendGrid setup, so nothing leaves the dyno; check
+`heroku logs -a routedesk-notification-service` to see it fire. Two events
+trigger it, both called from `ticket-service/routes/tickets.js`:
+
+- **Ticket created** (`notifyTeam`) — emails a made-up team address,
+  `<team>@routedesk.example.com` (e.g. `sre-oncall@routedesk.example.com`).
+- **Ticket assigned** (`notifyAssignee`) — emails the assignee's dummy
+  address from the sample roster (e.g. `diego.ramirez@routedesk.example.com`),
+  looked up via `findAssigneeEmail(team, name)`. Only fires when the
+  assignee actually changes to a non-empty value.
+
+Both go through the same `POST /api/notify` endpoint with a `type` field
+(`ticket_created` or `ticket_assigned`) so notification-service can pick the
+right recipient/subject. To wire up real email, replace the body of
+`sendEmail()` in `notification-service/index.js` with a call to an actual
+provider — nothing else needs to change.
+
 ## Local development (Docker Compose)
 
 ```bash
 docker compose up --build
+open http://localhost:8080          # the ticket UI
 curl http://localhost:8080/health
 curl -X POST http://localhost:8080/api/tickets \
   -H 'Content-Type: application/json' \
@@ -100,9 +164,11 @@ curl http://localhost:8080/api/tickets
 Compose runs all three services as separate containers on one network
 (`gateway`, `ticket-service`, `notification-service`), using plain HTTP and
 Docker's built-in service-name DNS — there's no Private Space locally, so
-this is the closest low-friction equivalent. Watch the `notification-service`
-container logs to see the "would notify team X" line fire after creating a
-ticket.
+this is the closest low-friction equivalent. The gateway container mounts
+`gateway/public/` as its static root, so the same frontend used in
+production works locally too. Watch the `notification-service` container
+logs (`docker compose logs -f notification-service`) to see the dummy
+`[email] ...` lines fire after creating a ticket or assigning one.
 
 ## Deploying to Heroku (Private Space + Internal Routing)
 

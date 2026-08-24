@@ -9,14 +9,40 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok' });
 });
 
+// Dummy email sender: logs what would be sent instead of calling a real
+// provider (SES, SendGrid, etc.). Swap sendEmail's body for a real
+// integration later — the call sites below wouldn't need to change.
+function sendEmail({ to, subject, body }) {
+  console.log(`[email] to=${to} subject="${subject}" body="${body}"`);
+}
+
 app.post('/api/notify', (req, res) => {
-  const { team, ticketId, title } = req.body || {};
-  if (!team || !ticketId) {
-    return res.status(400).json({ error: 'team and ticketId are required' });
+  const { type, ticketId, title, team, assigneeName, assigneeEmail } = req.body || {};
+  if (!type || !ticketId) {
+    return res.status(400).json({ error: 'type and ticketId are required' });
   }
 
-  // Stub: swap for a real Slack/email integration later.
-  console.log(`[notify] ticket #${ticketId} "${title}" routed to ${team}`);
+  if (type === 'ticket_created') {
+    if (!team) {
+      return res.status(400).json({ error: 'team is required for ticket_created' });
+    }
+    sendEmail({
+      to: `${team}@routedesk.example.com`,
+      subject: `New ticket #${ticketId}: ${title}`,
+      body: `A new ticket has been routed to your team (${team}).`,
+    });
+  } else if (type === 'ticket_assigned') {
+    if (!assigneeEmail) {
+      return res.status(400).json({ error: 'assigneeEmail is required for ticket_assigned' });
+    }
+    sendEmail({
+      to: assigneeEmail,
+      subject: `Ticket #${ticketId} assigned to you`,
+      body: `Hi ${assigneeName || ''}, you've been assigned ticket "${title}".`,
+    });
+  } else {
+    return res.status(400).json({ error: `unknown notification type: ${type}` });
+  }
 
   res.status(202).json({ accepted: true });
 });

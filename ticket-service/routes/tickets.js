@@ -19,14 +19,35 @@ function routeToTeam(category) {
 
 const STATUSES = ['open', 'in-progress', 'resolved', 'closed'];
 
-// Sample roster per team, used by the frontend to suggest an assignee.
+// Sample roster per team, used by the frontend to suggest an assignee and
+// by notifyAssignee() to address the (dummy) assignment email.
 const TEAM_MEMBERS = {
-  'finance-ops': ['Priya Shah', 'Marcus Lee'],
-  'sre-oncall': ['Diego Ramirez', 'Sarah Chen'],
-  engineering: ['Wei Zhang', 'Aisha Khan'],
-  'it-support': ['Tom Becker', 'Nina Petrova'],
-  'general-support': ['Alex Johnson', 'Jordan Smith'],
+  'finance-ops': [
+    { name: 'Priya Shah', email: 'priya.shah@routedesk.example.com' },
+    { name: 'Marcus Lee', email: 'marcus.lee@routedesk.example.com' },
+  ],
+  'sre-oncall': [
+    { name: 'Diego Ramirez', email: 'diego.ramirez@routedesk.example.com' },
+    { name: 'Sarah Chen', email: 'sarah.chen@routedesk.example.com' },
+  ],
+  engineering: [
+    { name: 'Wei Zhang', email: 'wei.zhang@routedesk.example.com' },
+    { name: 'Aisha Khan', email: 'aisha.khan@routedesk.example.com' },
+  ],
+  'it-support': [
+    { name: 'Tom Becker', email: 'tom.becker@routedesk.example.com' },
+    { name: 'Nina Petrova', email: 'nina.petrova@routedesk.example.com' },
+  ],
+  'general-support': [
+    { name: 'Alex Johnson', email: 'alex.johnson@routedesk.example.com' },
+    { name: 'Jordan Smith', email: 'jordan.smith@routedesk.example.com' },
+  ],
 };
+
+function findAssigneeEmail(team, name) {
+  const member = (TEAM_MEMBERS[team] || []).find((m) => m.name === name);
+  return member ? member.email : null;
+}
 
 const tickets = [];
 let nextId = 1;
@@ -36,22 +57,40 @@ let nextId = 1;
 // (e.g. https://routedesk-notification-service.herokuapp.com).
 const NOTIFICATION_SERVICE_URL = process.env.NOTIFICATION_SERVICE_URL;
 
-async function notifyTeam(ticket) {
+async function notify(payload) {
   if (!NOTIFICATION_SERVICE_URL) return;
 
   try {
     await fetch(`${NOTIFICATION_SERVICE_URL}/api/notify`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        team: ticket.team,
-        ticketId: ticket.id,
-        title: ticket.title,
-      }),
+      body: JSON.stringify(payload),
     });
   } catch (err) {
     console.warn(`notification-service call failed: ${err.message}`);
   }
+}
+
+function notifyTeam(ticket) {
+  return notify({
+    type: 'ticket_created',
+    ticketId: ticket.id,
+    title: ticket.title,
+    team: ticket.team,
+  });
+}
+
+function notifyAssignee(ticket) {
+  const assigneeEmail = findAssigneeEmail(ticket.team, ticket.assignee);
+  if (!assigneeEmail) return;
+
+  return notify({
+    type: 'ticket_assigned',
+    ticketId: ticket.id,
+    title: ticket.title,
+    assigneeName: ticket.assignee,
+    assigneeEmail,
+  });
 }
 
 router.post('/', (req, res) => {
@@ -108,7 +147,13 @@ router.patch('/:id', (req, res) => {
     ticket.status = status;
   }
   if (assignee !== undefined) {
-    ticket.assignee = assignee || null;
+    const newAssignee = assignee || null;
+    if (newAssignee && newAssignee !== ticket.assignee) {
+      ticket.assignee = newAssignee;
+      notifyAssignee(ticket);
+    } else {
+      ticket.assignee = newAssignee;
+    }
   }
 
   res.json(ticket);

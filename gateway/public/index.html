@@ -222,7 +222,7 @@ function openModal(id) {
 
   const assigneeSelect = document.getElementById('modal-assignee');
   const teamRoster = (roster.teamMembers && roster.teamMembers[ticket.team]) || [];
-  const options = ['(unassigned)', ...teamRoster];
+  const options = ['(unassigned)', ...teamRoster.map(m => m.name)];
   if (ticket.assignee && !options.includes(ticket.assignee)) options.push(ticket.assignee);
   assigneeSelect.innerHTML = options.map(name => {
     const value = name === '(unassigned)' ? '' : name;
